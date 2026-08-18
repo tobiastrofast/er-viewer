@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>er-viewer · 360° Image Viewer</title>
+
+  <!-- Pannellum 360° viewer -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css" />
+  <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0f0f13;
+      color: #e8e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 1rem 1.5rem;
+      background: #18181f;
+      border-bottom: 1px solid #2a2a38;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: 0.04em; }
+    header span { font-size: 0.78rem; color: #7878a0; }
+
+    #drop-zone {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      padding: 3rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #drop-zone.drag-over { background: #1e1e2e; }
+    #drop-zone svg { opacity: 0.35; }
+    #drop-zone p { color: #9090b8; font-size: 0.95rem; text-align: center; }
+    #drop-zone strong { color: #c0c0e0; }
+
+    #file-input { display: none; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.55rem 1.2rem;
+      border-radius: 8px;
+      border: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: #5b5bf6; color: #fff; }
+    .btn-warning { background: #d97706; color: #fff; }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid #3a3a55;
+      color: #c0c0e0;
+    }
+
+    /* Overlay card */
+    #overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.72);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    #overlay.visible { display: flex; }
+    .card {
+      background: #1e1e2c;
+      border: 1px solid #2e2e46;
+      border-radius: 14px;
+      padding: 2rem 2.2rem;
+      max-width: 420px;
+      width: 90%;
+      text-align: center;
+    }
+    .card h2 { font-size: 1.05rem; margin-bottom: 0.6rem; }
+    .card p { color: #9090b8; font-size: 0.88rem; line-height: 1.6; margin-bottom: 1.4rem; }
+    .card-actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+    .icon { font-size: 2rem; margin-bottom: 0.5rem; }
+
+    /* Toast */
+    #toast {
+      position: fixed;
+      bottom: 1.5rem; left: 50%;
+      transform: translateX(-50%) translateY(4rem);
+      background: #2a2a3e;
+      border: 1px solid #3a3a58;
+      color: #e8e8f0;
+      padding: 0.65rem 1.2rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      transition: transform 0.3s ease;
+      z-index: 200;
+      pointer-events: none;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+    #toast.error { border-color: #7f1d1d; background: #2d1212; color: #fca5a5; }
+
+    /* Viewer */
+    #viewer-wrap {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+    }
+    #viewer-wrap.visible { display: flex; }
+    #viewer-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.6rem 1rem;
+      background: #18181f;
+      border-bottom: 1px solid #2a2a38;
+    }
+    #viewer-toolbar .filename {
+      font-size: 0.82rem;
+      color: #8080a8;
+      margin-left: auto;
+    }
+    #pannellum-container { flex: 1; }
+
+    /* Metadata bar */
+    #meta-bar {
+      display: none;
+      flex-wrap: wrap;
+      gap: 0.25rem 1.5rem;
+      padding: 0.5rem 1rem;
+      background: #13131a;
+      border-bottom: 1px solid #22223a;
+      font-size: 0.78rem;
+      color: #7878a0;
+    }
+    #meta-bar.visible { display: flex; }
+    .meta-item { display: flex; gap: 0.35rem; align-items: center; }
+    .meta-label { color: #4a4a6a; text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.05em; }
+    .meta-value { color: #b0b0d0; }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      background: rgba(8, 8, 15, 0.4);
+      backdrop-filter: blur(8px);
+      z-index: 300;
+    }
+    .modal.visible { display: flex; }
+    .modal-panel {
+      background: rgba(17, 17, 24, 0.9);
+      border: 1px solid rgba(137, 137, 180, 0.18);
+      border-radius: 16px;
+      width: min(860px, 92vw);
+      max-height: 76vh;
+      overflow: auto;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.35);
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1.1rem 1.25rem;
+      border-bottom: 1px solid rgba(137, 137, 180, 0.12);
+      position: sticky;
+      top: 0;
+      background: rgba(17, 17, 24, 0.9);
+      backdrop-filter: blur(8px);
+    }
+    .modal-header h3 {
+      font-size: 1rem;
+      letter-spacing: 0.04em;
+      font-weight: 600;
+    }
+    .modal-body {
+      padding: 1rem 1.25rem 1.3rem;
+    }
+    .meta-section {
+      margin-bottom: 1.25rem;
+    }
+    .meta-section h4 {
+      font-size: 0.74rem;
+      color: #8f8fb4;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 0.6rem;
+    }
+    .meta-grid {
+      display: grid;
+      gap: 0.5rem;
+    }
+    .meta-row {
+      display: grid;
+      grid-template-columns: minmax(120px, 220px) 1fr;
+      gap: 0.75rem;
+      padding: 0.5rem 0.7rem;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(137, 137, 180, 0.1);
+    }
+    .meta-row.highlight {
+      background: rgba(91, 91, 246, 0.08);
+      border-color: rgba(91, 91, 246, 0.25);
+    }
+    .meta-row.missing {
+      background: rgba(255, 99, 99, 0.05);
+      border-color: rgba(255, 99, 99, 0.22);
+    }
+    .meta-key {
+      color: #8b8bb7;
+      font-size: 0.74rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      word-break: break-word;
+    }
+    .meta-value {
+      color: #e9e9fb;
+      font-size: 0.82rem;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+    }
+
+    /* Spinner */
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid #3a3a55;
+      border-top-color: #5b5bf6;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin: 0 auto;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loading {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      flex: 1;
+      color: #7878a0;
+      font-size: 0.9rem;
+    }
+    #loading.visible { display: flex; }
+
+    #drop-zone-wrap { display: flex; flex-direction: column; flex: 1; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>er-viewer</h1>
+  <span>360° Equirectangular Image Viewer</span>
+</header>
+
+<!-- Drop zone -->
+<div id="drop-zone-wrap">
+  <div id="drop-zone">
+    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#9090b8" stroke-width="1.2">
+      <circle cx="12" cy="12" r="10"/><ellipse cx="12" cy="12" rx="4" ry="10"/>
+      <line x1="2" y1="12" x2="22" y2="12"/>
+    </svg>
+    <p><strong>Drop a JPEG image here</strong><br/>or click to browse</p>
+    <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">Browse file</button>
+    <input type="file" id="file-input" accept=".jpg,.jpeg" />
+  </div>
+
+  <!-- Loading -->
+  <div id="loading">
+    <div class="spinner"></div>
+    <span id="loading-msg">Loading…</span>
+  </div>
+</div>
+
+<!-- Viewer -->
+<div id="viewer-wrap">
+  <div id="viewer-toolbar">
+    <button class="btn btn-ghost" id="btn-back">← Back</button>
+    <button class="btn btn-ghost" id="btn-metadata">ℹ Metadata</button>
+    <a class="btn btn-primary" id="btn-download" style="display:none; text-decoration:none;">⬇ Download tagged file</a>
+    <span class="filename" id="viewer-filename"></span>
+  </div>
+  <div id="meta-bar">
+    <div class="meta-item"><span class="meta-label">Date</span><span class="meta-value" id="meta-date">—</span></div>
+    <div class="meta-item"><span class="meta-label">Camera</span><span class="meta-value" id="meta-camera">—</span></div>
+    <div class="meta-item"><span class="meta-label">Resolution</span><span class="meta-value" id="meta-res">—</span></div>
+    <div class="meta-item"><span class="meta-label">Projection</span><span class="meta-value" id="meta-proj">—</span></div>
+  </div>
+  <div id="pannellum-container"></div>
+</div>
+
+<!-- Overlay: missing metadata -->
+<div id="overlay">
+  <div class="card">
+    <div class="icon">⚠️</div>
+    <h2>Missing XMP Metadata</h2>
+    <p id="overlay-msg"></p>
+    <div class="card-actions">
+      <button class="btn btn-primary" id="btn-tag-permanent">🏷 Tag permanently</button>
+      <button class="btn btn-warning" id="btn-tag-temp">👁 View temporarily</button>
+      <button class="btn btn-ghost" id="btn-cancel">Cancel</button>
+    </div>
+    <p style="margin-top:1rem; font-size:0.78rem; color:#555580;">
+      <strong>Permanently:</strong> writes the tag to the uploaded copy, then lets you download the result to replace your original.<br/>
+      <strong>Temporarily:</strong> views as 360° without changing any file.
+    </p>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<div id="metadata-modal" class="modal">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <h3>Panorama metadata</h3>
+      <button class="btn btn-ghost" id="btn-close-metadata">Close</button>
+    </div>
+    <div id="metadata-modal-body" class="modal-body"></div>
+  </div>
+</div>
+
+<script>
+  let currentFilename = null;
+  let viewer = null;
+  let lastXmp = null;
+
+  const dropZoneWrap = document.getElementById('drop-zone-wrap');
+  const dropZone     = document.getElementById('drop-zone');
+  const loadingEl    = document.getElementById('loading');
+  const loadingMsg   = document.getElementById('loading-msg');
+  const viewerWrap   = document.getElementById('viewer-wrap');
+  const overlay      = document.getElementById('overlay');
+  const toast        = document.getElementById('toast');
+  const fileInput    = document.getElementById('file-input');
+  const btnDownload  = document.getElementById('btn-download');
+
+  // ── Drag & drop ──────────────────────────────────────────────
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  });
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+  // ── File handling ─────────────────────────────────────────────
+  async function handleFile(file) {
+    if (!/\.jpe?g$/i.test(file.name)) { showToast('Only JPEG files are supported.', true); return; }
+
+    showLoading('Uploading…');
+
+    const form = new FormData();
+    form.append('image', file);
+
+    let filename;
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      filename = data.filename;
+    } catch (e) {
+      hideLoading(); showToast('Upload failed: ' + e.message, true); return;
+    }
+
+    currentFilename = filename;
+    showLoading('Reading metadata…');
+
+    try {
+      const res = await fetch(`/api/xmp/${filename}`);
+      const xmp = await res.json();
+
+      const pt = (xmp.projectionType || '').toLowerCase();
+      lastXmp = xmp;
+      if (pt === 'equirectangular') {
+        hideLoading();
+        launchViewer(filename, file.name, false);
+      } else {
+        hideLoading();
+        showOverlay(pt);
+      }
+    } catch {
+      hideLoading(); showToast('Could not read metadata.', true);
+    }
+  }
+
+  // ── Overlay ───────────────────────────────────────────────────
+  function showOverlay(foundType) {
+    const msg = foundType
+      ? `This image has <code>ProjectionType = "${foundType}"</code>, not "equirectangular".`
+      : `This image is missing <code>GPano:ProjectionType = "equirectangular"</code>.`;
+    document.getElementById('overlay-msg').innerHTML = msg;
+    overlay.classList.add('visible');
+  }
+
+  document.getElementById('btn-cancel').addEventListener('click', () => {
+    overlay.classList.remove('visible');
+    if (currentFilename) fetch(`/api/file/${currentFilename}`, { method: 'DELETE' });
+    currentFilename = null;
+  });
+
+  document.getElementById('btn-metadata').addEventListener('click', () => {
+    if (!currentFilename || !lastXmp) return;
+    renderMetadataModal(lastXmp.raw || lastXmp);
+    document.getElementById('metadata-modal').classList.add('visible');
+  });
+
+  document.getElementById('btn-close-metadata').addEventListener('click', () => {
+    document.getElementById('metadata-modal').classList.remove('visible');
+  });
+
+  document.getElementById('metadata-modal').addEventListener('click', (event) => {
+    if (event.target.id === 'metadata-modal') {
+      event.target.classList.remove('visible');
+    }
+  });
+
+  // Temporary: view without writing any metadata
+  document.getElementById('btn-tag-temp').addEventListener('click', () => {
+    overlay.classList.remove('visible');
+    launchViewer(currentFilename, currentFilename, false);
+  });
+
+  // Permanent: write XMP to the temp copy, then offer download
+  document.getElementById('btn-tag-permanent').addEventListener('click', async () => {
+    overlay.classList.remove('visible');
+    showLoading('Writing XMP metadata…');
+    try {
+      const res = await fetch(`/api/tag/${currentFilename}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      showToast('✓ Tag written. Download the file to save it permanently.');
+      hideLoading();
+      launchViewer(currentFilename, currentFilename, true);
+    } catch (e) {
+      hideLoading();
+      showToast('Failed to write tag: ' + e.message, true);
+      launchViewer(currentFilename, currentFilename, false);
+    }
+  });
+
+  // ── Viewer ────────────────────────────────────────────────────
+  function launchViewer(filename, displayName, showDownload) {
+    document.getElementById('viewer-filename').textContent = displayName;
+
+    // Show/hide download button
+    if (showDownload) {
+      btnDownload.href = `/api/download/${filename}`;
+      btnDownload.style.display = '';
+    } else {
+      btnDownload.style.display = 'none';
+    }
+
+    // Populate metadata bar
+    const xmp = lastXmp || {};
+    const metaBar = document.getElementById('meta-bar');
+
+    const dateRaw = xmp.dateTime || '';
+    // exiftool format: "YYYY:MM:DD HH:MM:SS" → pretty print
+    const dateStr = dateRaw
+      ? dateRaw.replace(/^(\d{4}):(\d{2}):(\d{2}) /, '$3.$2.$1 ')
+      : '—';
+
+    const camera = [xmp.make, xmp.model].filter(Boolean).join(' ') || '—';
+    const res = (xmp.width && xmp.height) ? `${xmp.width} × ${xmp.height} px` : '—';
+    const proj = xmp.projectionType || '—';
+
+    document.getElementById('meta-date').textContent   = dateStr;
+    document.getElementById('meta-camera').textContent = camera;
+    document.getElementById('meta-res').textContent    = res;
+    document.getElementById('meta-proj').textContent   = proj;
+    metaBar.classList.add('visible');
+
+    dropZoneWrap.style.display = 'none';
+    viewerWrap.classList.add('visible');
+
+    if (viewer) { viewer.destroy(); viewer = null; }
+
+    viewer = pannellum.viewer('pannellum-container', {
+      type: 'equirectangular',
+      panorama: `/uploads/${filename}`,
+      autoLoad: true,
+      showControls: true,
+      mouseZoom: true,
+      keyboardZoom: false,
+      hfov: 100,
+    });
+  }
+
+  document.getElementById('btn-back').addEventListener('click', () => {
+    if (viewer) { viewer.destroy(); viewer = null; }
+    if (currentFilename) fetch(`/api/file/${currentFilename}`, { method: 'DELETE' });
+    currentFilename = null;
+    lastXmp = null;
+    fileInput.value = '';
+    btnDownload.style.display = 'none';
+    document.getElementById('meta-bar').classList.remove('visible');
+    viewerWrap.classList.remove('visible');
+    dropZoneWrap.style.display = '';
+  });
+
+  // ── Helpers ───────────────────────────────────────────────────
+  function showLoading(msg) {
+    loadingMsg.textContent = msg;
+    dropZone.style.display = 'none';
+    loadingEl.classList.add('visible');
+  }
+  function hideLoading() {
+    loadingEl.classList.remove('visible');
+    dropZone.style.display = '';
+  }
+
+  function renderMetadataModal(data) {
+    const modalBody = document.getElementById('metadata-modal-body');
+    if (!data || typeof data !== 'object') {
+      modalBody.innerHTML = '<p class="meta-value">No metadata available.</p>';
+      return;
+    }
+
+    const source = data.raw || data;
+    const entries = Object.entries(source).filter(([, value]) => value !== undefined && value !== null && value !== '');
+
+    const relevantKeys = [
+      'ProjectionType',
+      'UsePanoramaViewer',
+      'ImageWidth',
+      'ImageHeight',
+      'DateTimeOriginal',
+      'CreateDate',
+      'Make',
+      'Model',
+      'ExposureTime',
+      'FNumber',
+      'ISO',
+      'Flash',
+      'ExposureProgram',
+      'WhiteBalance',
+      'MeteringMode',
+      'GPSLatitude',
+      'GPSLongitude',
+      'XMP-GPano:ProjectionType',
+      'XMP-GPano:UsePanoramaViewer',
+    ];
+
+    const renderRows = (rows, { highlight = false } = {}) => rows.map(([key, value]) => `
+      <div class="meta-row ${highlight ? 'highlight' : ''} ${value === 'Missing' ? 'missing' : ''}">
+        <div class="meta-key">${key}</div>
+        <div class="meta-value">${String(value)}</div>
+      </div>
+    `).join('');
+
+    const panoramaRows = relevantKeys.map((key) => {
+      const value = source[key];
+      if (value !== undefined && value !== null && value !== '') {
+        return [key, value];
+      }
+      return [key, 'Missing'];
+    });
+
+    const otherEntries = entries.filter(([key]) => !relevantKeys.includes(key));
+
+    modalBody.innerHTML = `
+      <div class="meta-section">
+        <h4>360° panorama checks</h4>
+        <div class="meta-grid">
+          ${renderRows(panoramaRows, { highlight: true })}
+        </div>
+      </div>
+      <div class="meta-section">
+        <h4>All metadata</h4>
+        <div class="meta-grid">
+          ${otherEntries.length ? renderRows(otherEntries) : '<div class="meta-row"><div class="meta-key">Status</div><div class="meta-value">No additional metadata was returned.</div></div>'}
+        </div>
+      </div>
+    `;
+  }
+
+  let toastTimer;
+  function showToast(msg, isError = false) {
+    toast.textContent = msg;
+    toast.className = 'show' + (isError ? ' error' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.className = ''; }, 4500);
+  }
+</script>
+</body>
+</html>
